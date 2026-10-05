@@ -220,6 +220,34 @@ mod tests {
     }
 
     #[test]
+    fn lab16_chroma_scale_round_trips() {
+        // Two pixels of three channels: L is untouched, a*/b* rescale, and every PSD value
+        // comes back exactly.
+        let mut all = Vec::new();
+        for v in 0..=u16::MAX {
+            all.extend_from_slice(&v.to_ne_bytes());
+            all.extend_from_slice(&v.to_ne_bytes());
+            all.extend_from_slice(&v.to_ne_bytes());
+        }
+        let orig = all.clone();
+        lab16_chroma(&mut all, 3, true);
+        let px = |b: &[u8], i: usize, c: usize| u16::from_ne_bytes([b[(i * 3 + c) * 2], b[(i * 3 + c) * 2 + 1]]);
+        // Neutral (32768 in PSD) is 128 / 255 of the document scale; 65280 (a* = 127) is the top.
+        assert_eq!(px(&all, 32768, 0), 32768);
+        assert_eq!(px(&all, 32768, 1), (32768.0f64 * 65535.0 / 65280.0).round() as u16);
+        assert_eq!(px(&all, 65280, 2), 65535);
+        lab16_chroma(&mut all, 3, false);
+        for i in 0..=65280usize {
+            assert_eq!(px(&all, i, 1), px(&orig, i, 1), "{i}");
+        }
+        // Short or odd buffers are left alone.
+        let mut short = vec![1u8, 2, 3];
+        lab16_chroma(&mut short, 3, true);
+        lab16_chroma(&mut short, 1, true);
+        assert_eq!(short, [1, 2, 3]);
+    }
+
+    #[test]
     fn be_codec() {
         let mut v = Vec::new();
         encode_be(1.0, SampleType::U16, &mut v);

@@ -129,8 +129,7 @@ pub(crate) fn bake(stops: Vec<(f32, Color)>, midpoints: &[f32], smoothness: f32,
         // Stop colours carry no alpha in Photoshop (opacity has its own stops); keep the nearest.
         s.iter().min_by(|a, b| (a.0 - t).abs().total_cmp(&(b.0 - t).abs())).map_or(1.0, |x| x.1.alpha)
     };
-    let pts: Vec<(f32, [f32; 3])> =
-        s.iter().map(|(t, c)| (*t, if lab { [c.c[0], c.c[1], c.c[2]] } else { into_space(method, c.to_rgb()) })).collect();
+    let pts: Vec<(f32, [f32; 3])> = s.iter().map(|(t, c)| (*t, if lab { [c.c[0], c.c[1], c.c[2]] } else { into_space(method, c.to_rgb()) })).collect();
     const N: usize = 96;
     let mut out: Vec<(f32, Color)> = (0..=N)
         .map(|k| {
@@ -189,6 +188,20 @@ mod tests {
         let p = at(&s, 0.113);
         for (got, want) in p.iter().zip([0.839f32, 0.608, 0.290]) {
             assert!((got - want).abs() < 0.012, "{p:?}");
+        }
+    }
+
+    #[test]
+    fn classic_lab_stops_interpolate_in_lab() {
+        // Lab documents blend Classic gradients in L*a*b* (psd-tools 4x4_16bit_lab): the half-way
+        // colour is the Lab average, even without smoothness.
+        let lab = |l: f32, a: f32, b: f32| Color { mode: ColorMode::Lab, c: [l / 100.0, (a + 128.0) / 255.0, (b + 128.0) / 255.0, 0.0], alpha: 1.0 };
+        let s = bake(vec![(0.0, lab(19.07, 52.29, -85.08)), (1.0, lab(54.29, 80.81, 69.91))], &[0.5], 0.0, Method::Classic);
+        assert!(s.len() > 2 && s.iter().all(|(_, c)| c.mode == ColorMode::Lab));
+        let mid = s.iter().find(|(t, _)| (t - 0.5).abs() < 1e-6).map(|(_, c)| *c).unwrap();
+        let want = lab(36.68, 66.55, -7.585);
+        for i in 0..3 {
+            assert!((mid.c[i] - want.c[i]).abs() < 1e-4, "{mid:?}");
         }
     }
 

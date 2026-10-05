@@ -1042,6 +1042,70 @@ fn levels_matches_photoshop() {
     assert!((adjust::levels(&ident(1.0), 0.37) - 0.37).abs() < 1e-6);
 }
 
+// Photoshop (psd-tools levels_grayscale, 8-bit): input range 44..214, gamma 1.78. The stretch
+// is rounded to whole levels before the gamma (45 → 1.5 → 2, 47 → 4.5 → 5), so the shadows
+// step unevenly: 45, 46, 47, 48, 52, 69 → 7, 10, 17, 20, 37, 88.
+#[test]
+fn levels_work_on_whole_levels() {
+    let ch = LevelsChannel { in_black: 44.0 / 255.0, in_white: 214.0 / 255.0, gamma: 1.78, out_black: 0.0, out_white: 1.0 };
+    let adj = Adjustment::Levels {
+        master: LevelsChannel::default(),
+        per_channel: [ch.clone(), ch.clone(), ch.clone()],
+        space: Default::default(),
+        black: LevelsChannel::default(),
+    };
+    let luts = adjust::tone_luts_q(&adj, Some(255.0));
+    let at = |v: u8| {
+        let x = f32::from(v) / 255.0 * 4095.0;
+        let (i, f) = (x.floor() as usize, x.fract());
+        let y = luts[0][i] * (1.0 - f) + luts[0][(i + 1).min(4095)] * f;
+        (y * 255.0).round()
+    };
+    for (v, ps) in [(44u8, 0.0f32), (45, 7.0), (46, 10.0), (47, 17.0), (48, 20.0), (52, 37.0), (69, 88.0), (100, 137.0), (214, 255.0)] {
+        assert!((at(v) - ps).abs() <= 1.0, "levels {v}: got {} want {ps}", at(v));
+    }
+    // 16-bit and float stay smooth (no 8-bit staircase).
+    for q in [Some(32768.0), None] {
+        let a = adjust::levels_q(&ch, 0.2, q);
+        let b = adjust::levels_q(&ch, 0.2 + 1.0 / 2048.0, q);
+        assert!(b > a && b - a < 2.0 / 255.0, "{q:?}: {a} {b}");
+    }
+    // Hostile quantum values fall back to the continuous curve.
+    for q in [Some(0.0), Some(f32::NAN), Some(-3.0)] {
+        assert_eq!(adjust::levels_q(&ch, 0.4, q), adjust::levels(&ch, 0.4));
+    }
+}
+
+// Exposure linearises RGB documents through a 2.2 power, not the sRGB curve: Photoshop lifts 76
+// to 134 with an offset of 0.1738 (psd-tools adjustment_nested_composition_4).
+#[test]
+fn exposure_offset_uses_gamma_2_2_in_rgb() {
+    let mut b = Buffer::filled(Rect::new(0, 0, 1, 1), [76.0 / 255.0, 76.0 / 255.0, 76.0 / 255.0, 1.0]);
+    adjust::apply_with(&Adjustment::Exposure { exposure: 0.0, offset: 0.1738, gamma: 1.0 }, &mut b, adjust::Transfer::Srgb);
+    assert_eq!((b.px[0][0] * 255.0).round(), 134.0);
+    assert_eq!(adjust::Transfer::Gamma(1.732).for_exposure(), adjust::Transfer::Gamma(1.732));
+}
+
+// A 30° Reflected gradient fill on a 4 × 4 canvas renders as Photoshop's (its end point snaps to
+// the corner: t = |x − y| / 4) at every depth.
+#[test]
+fn small_gradient_fill_matches_photoshop_at_all_depths() {
+    let stops = vec![(0.0, Color::rgb(0.0, 0.0, 0.0)), (1.0, Color::rgb(1.0, 1.0, 1.0))];
+    for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+        let mut d = Document::new("g", Size::new(4, 4), ColorMode::Rgb, depth);
+        let fill = Fill::Gradient { stops: stops.clone(), angle: 30.0, scale: 1.0, style: photocraft_doc::GradientStyle::Reflected, reverse: false };
+        d.layers.push(Layer::new("g", LayerContent::Fill(fill)));
+        let out = flatten(&d);
+        for y in 0..4usize {
+            for x in 0..4usize {
+                let want = (x as f32 - y as f32).abs() / 4.0;
+                let got = out.px[y * 4 + x][0];
+                assert!((got - want).abs() < 1.0 / 255.0, "{depth:?} ({x},{y}): {got} vs {want}");
+            }
+        }
+    }
+}
+
 /// A tall document with soft content, a translucent region and an adjustment.
 fn tall_doc(w: u32, h: u32) -> Document {
     let mut d = doc_white(w, h);

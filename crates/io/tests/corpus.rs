@@ -37,7 +37,7 @@ const PASS_TOL: f32 = 2.0 / 255.0;
 /// Export → re-import must render within one 8-bit step of the imported document.
 const ROUNDTRIP_TOL: f32 = 1.0 / 255.0 + 1e-5;
 /// Files whose flatten matches Photoshop's merged image (`corpus/psd`, 170 files).
-const PASS_FLOOR: usize = 113;
+const PASS_FLOOR: usize = 120;
 /// Files whose export → re-import renders the same as the import.
 const ROUNDTRIP_FLOOR: usize = 169;
 

@@ -203,6 +203,11 @@ fn adjustment_layers() {
         d.layers.push(noise_layer("bg", fmt, Rect::from_xywh(0, 0, 40, 30), 71, 0.5));
         d.layers.push(Layer::new("ex", LayerContent::Adjustment(Adjustment::Exposure { exposure: 0.4, offset: 0.01, gamma: 1.1 })));
         check(&mut g, &d, &format!("adjustment {depth:?}"));
+        // Levels on whole levels of the document's depth (compose::adjust::levels_q).
+        let lc = LevelsChannel { in_black: 0.17, in_white: 0.84, gamma: 1.78, out_black: 0.0, out_white: 1.0 };
+        let lv = Adjustment::Levels { master: lc, per_channel: Default::default(), space: Default::default(), black: LevelsChannel::default() };
+        d.layers.push(Layer::new("lv", LayerContent::Adjustment(lv)));
+        check(&mut g, &d, &format!("levels {depth:?}"));
     }
     for adj in adjustments() {
         for (mode, opacity, masked) in [(BlendMode::Normal, 1.0, false), (BlendMode::Multiply, 0.7, true)] {
@@ -306,6 +311,14 @@ fn fills_and_dissolve() {
         l.opacity = 0.9;
         d.layers.push(l);
         check(&mut g, &d, &format!("gradient {style:?}"));
+    }
+    // Tiny frames, where the whole-pixel end points (compose::fill_layout) change the angle
+    // and centre.
+    for (w, h, style, angle) in [(4, 4, GradientStyle::Reflected, 30.0), (7, 5, GradientStyle::Linear, 30.0), (9, 4, GradientStyle::Linear, -60.0)] {
+        let mut d = base_doc(w, h);
+        let stops = vec![(0.0, Color::rgb(0.0, 0.0, 0.7)), (0.5, Color::rgb(1.0, 0.0, 0.0)), (1.0, Color::rgb(1.0, 1.0, 0.0))];
+        d.layers.push(Layer::new("grad", LayerContent::Fill(Fill::Gradient { stops, angle, scale: 1.0, style, reverse: false })));
+        check(&mut g, &d, &format!("small gradient {w}x{h} {style:?} {angle}"));
     }
     let mut d = base_doc(64, 48);
     let mut l = noise_layer("dis", PixelFormat::RGBA8, Rect::new(0, 0, 64, 48), 41, 0.2);
