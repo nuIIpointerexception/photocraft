@@ -122,6 +122,27 @@ impl GradientPreset {
             .collect()
     }
 
+    /// Colour stops (live colours resolved now, sorted, opaque) and opacity stops (sorted; empty
+    /// when fully opaque) kept apart, as an editable Gradient Fill layer holds them.
+    pub fn fill_stops(&self, fg: [f32; 4], bg: [f32; 4]) -> FillStops {
+        let rgb = |c: StopColor| match c {
+            StopColor::Foreground => Color::rgb(fg[0], fg[1], fg[2]),
+            StopColor::Background => Color::rgb(bg[0], bg[1], bg[2]),
+            StopColor::Rgb(c) => Color::rgb(c[0], c[1], c[2]),
+        };
+        let mut cs: Vec<(f32, Color)> = self.stops.iter().map(|(t, c)| (t.clamp(0.0, 1.0), rgb(*c))).collect();
+        cs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        if cs.is_empty() {
+            cs = vec![(0.0, rgb(StopColor::Foreground)), (1.0, rgb(StopColor::Background))];
+        }
+        let mut os: Vec<(f32, f32)> = self.opacity.iter().map(|(t, a)| (t.clamp(0.0, 1.0), a.clamp(0.0, 1.0))).collect();
+        os.sort_by(|a, b| a.0.total_cmp(&b.0));
+        if os.iter().all(|o| (o.1 - 1.0).abs() < 1e-6) {
+            os.clear();
+        }
+        (cs, os)
+    }
+
     /// Stops for a Gradient Fill layer / overlay (live colours resolved now, like Photoshop).
     pub fn doc_stops(&self, fg: [f32; 4], bg: [f32; 4]) -> Vec<(f32, Color)> {
         self.resolve(fg, bg).into_iter().map(|(t, c)| (t, Color::rgba(c[0], c[1], c[2], c[3]))).collect()
@@ -307,6 +328,9 @@ pub fn builtin() -> Vec<Group<GradientPreset>> {
 /// RGBA stops `(location, colour)` ready to paint.
 pub type Stops = Vec<(f32, [f32; 4])>;
 
+/// Colour stops and opacity stops of a Gradient Fill layer.
+pub type FillStops = (Vec<(f32, Color)>, Vec<(f32, f32)>);
+
 const CMD_SELECT: &str = "gradient.presets.select";
 
 /// Gradient for the Gradient tool: `"gradient": preset name`, else explicit `"stops"`, else the
@@ -361,12 +385,14 @@ fn select(s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("applyToLayer").and_then(Value::as_bool).unwrap_or(true)
         && let Some(id) = active_gradient_fill(s)
     {
-        let stops_new = g.doc_stops(s.tools.foreground, s.tools.background);
+        let (stops_new, opacity_new) = g.fill_stops(s.tools.foreground, s.tools.background);
         s.edit("Change Gradient Fill", |doc, _| {
             if let Some(l) = doc.layer_mut(id)
-                && let LayerContent::Fill(Fill::Gradient { stops, .. }) = &mut l.content
+                && let LayerContent::Fill(Fill::Gradient { stops, opacity_stops, midpoints, .. }) = &mut l.content
             {
                 *stops = stops_new;
+                *opacity_stops = opacity_new;
+                midpoints.clear();
             }
             Ok(())
         })?;
@@ -384,7 +410,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let style = crate::layer_style::gradient_style(p.get("style").and_then(Value::as_str).unwrap_or("linear"));
     let reverse = p.get("reverse").and_then(Value::as_bool).unwrap_or(false);
     let id = s.edit("New Gradient Fill Layer", |doc, active| {
-        let fill = Fill::Gradient { stops, angle, scale, style, reverse };
+        let fill = Fill::gradient(stops, angle, scale, style, reverse);
         let id = doc.insert_above(*active, Layer::new(doc.next_layer_name("Gradient Fill"), LayerContent::Fill(fill)));
         *active = Some(id);
         Ok(id)

@@ -32,6 +32,7 @@ pub mod filters_ext;
 mod frame_cmds;
 pub mod fx_view_cmds;
 pub mod gallery_cmds;
+pub mod gradient_fill_cmds;
 pub mod group_view_cmds;
 pub mod image_cmds;
 pub mod inspect;

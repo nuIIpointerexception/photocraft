@@ -620,13 +620,13 @@ fn build() -> Vec<CommandSpec> {
                 let style = crate::layer_style::gradient_style(p.get("style").and_then(Value::as_str).unwrap_or("linear"));
                 let reverse = p.get("reverse").and_then(Value::as_bool).unwrap_or(false);
                 let id = s.edit("New Gradient Fill Layer", |doc, active| {
-                    let fill = Fill::Gradient {
-                        stops: vec![(0.0, Color::rgba(a[0], a[1], a[2], a[3])), (1.0, Color::rgba(b[0], b[1], b[2], b[3]))],
+                    let fill = Fill::gradient(
+                        vec![(0.0, Color::rgba(a[0], a[1], a[2], a[3])), (1.0, Color::rgba(b[0], b[1], b[2], b[3]))],
                         angle,
-                        scale: 1.0,
+                        1.0,
                         style,
                         reverse,
-                    };
+                    );
                     let id = doc.insert_above(*active, Layer::new(doc.next_layer_name("Gradient Fill"), LayerContent::Fill(fill)));
                     *active = Some(id);
                     Ok(id)
@@ -933,6 +933,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::filters::specs());
     v.extend(crate::filters_ext::specs());
     v.extend(crate::gallery_cmds::specs());
+    v.extend(crate::gradient_fill_cmds::specs());
     v.extend(crate::type_cmds::specs());
     v.extend(crate::transform_cmds::specs());
     v.extend(crate::vector_cmds::specs());
