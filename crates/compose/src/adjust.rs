@@ -51,6 +51,13 @@ pub fn apply(adj: &Adjustment, buf: &mut Buffer) {
 
 /// Applies an adjustment with the document's tone transfer.
 pub fn apply_with(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer) {
+    apply_depth(adj, buf, transfer, None);
+}
+
+/// Applies an adjustment with the document's tone transfer, on samples with `quantum` steps
+/// per unit (the document's integer depth, see `adjustment_quantum`): Levels then works on
+/// whole levels like Photoshop's (see [`levels_q`]).
+pub fn apply_depth(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, quantum: Option<f32>) {
     match adj {
         Adjustment::Invert => map_rgb(buf, |c| [1.0 - c[0], 1.0 - c[1], 1.0 - c[2]]),
         Adjustment::Threshold { level } => {
@@ -97,7 +104,7 @@ pub fn apply_with(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer) {
             })
         }
         Adjustment::Levels { space, .. } | Adjustment::Curves { space, .. } => {
-            let luts = tone_luts(adj);
+            let luts = tone_luts_q(adj, quantum);
             match space {
                 ToneSpace::Rgb => map_rgb(buf, |c| std::array::from_fn(|i| lut(&luts[i], c[i]))),
                 ToneSpace::Cmyk | ToneSpace::Lab => map_rgb(buf, |c| tone_in_space(*space, &luts, c)),
@@ -203,12 +210,18 @@ pub fn apply_with(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer) {
 /// `per_channel` channels then black (identity unless the space is CMYK). In Lab there is no
 /// composite record, so the master is ignored.
 pub fn tone_luts(adj: &Adjustment) -> [Vec<f32>; 4] {
+    tone_luts_q(adj, None)
+}
+
+/// [`tone_luts`] for samples with `quantum` steps per unit (Levels works on whole levels; see
+/// [`levels_q`]).
+pub fn tone_luts_q(adj: &Adjustment, quantum: Option<f32>) -> [Vec<f32>; 4] {
     let x = |k: usize| k as f32 / (LUT_SIZE - 1) as f32;
     match adj {
         Adjustment::Levels { master, per_channel, space, black } => {
             let ident = LevelsChannel::default();
             let m = if *space == ToneSpace::Lab { &ident } else { master };
-            let row = |c: &LevelsChannel| (0..LUT_SIZE).map(|k| levels(c, levels(m, x(k)))).collect();
+            let row = |c: &LevelsChannel| (0..LUT_SIZE).map(|k| levels_q(c, levels_q(m, x(k), quantum), quantum)).collect();
             [row(&per_channel[0]), row(&per_channel[1]), row(&per_channel[2]), row(if *space == ToneSpace::Cmyk { black } else { &ident })]
         }
         Adjustment::Curves { master, per_channel, space, black } => {
@@ -458,20 +471,37 @@ pub fn posterize(v: f32, levels: u32) -> f32 {
 }
 
 pub fn levels(ch: &LevelsChannel, v: f32) -> f32 {
+    levels_q(ch, v, None)
+}
+
+/// [`levels`] on samples with `quantum` steps per unit (8-bit: 255). Photoshop works on whole
+/// levels: the input is a level, and the input-range stretch is rounded (half up) to a whole
+/// level before the midtone gamma, so a 44..214 range maps 45, 46, 47, 48 → 1.5, 3, 4.5, 6 →
+/// 2, 3, 5, 6 (psd-tools levels_grayscale, where the gamma toe magnifies the steps). In a LUT
+/// the result is a staircase that is exact at every level.
+pub fn levels_q(ch: &LevelsChannel, v: f32, quantum: Option<f32>) -> f32 {
     let range = (ch.in_white - ch.in_black).max(1e-6);
-    let u = ((v - ch.in_black) / range).clamp(0.0, 1.0);
+    let u = match quantum.filter(|q| q.is_finite() && *q >= 1.0) {
+        Some(q) => {
+            let v = (v * q).round() / q;
+            (((v - ch.in_black) / range).clamp(0.0, 1.0) * q + 0.5 + 1e-3).floor() / q
+        }
+        None => ((v - ch.in_black) / range).clamp(0.0, 1.0),
+    };
     let g = ch.gamma.max(0.01);
     let t = if g > 1.0 {
         // A midtone gamma > 1 lifts shadows, and a pure `u^(1/g)` has infinite slope at black —
-        // which Photoshop bounds, giving a soft shadow toe (initial slope 2^gamma, verified against
-        // the real app). Soft-min (p-norm) of the power curve with the slope-2^gamma line; reduces
-        // to the exact power curve in the body, so highlights are unchanged. gamma <= 1 is untouched.
+        // which Photoshop bounds, giving a soft shadow toe (initial slope ≈ 2^gamma, verified against
+        // the real app). Soft-min (p-norm) of the power curve with that line; reduces to the exact
+        // power curve in the body, so highlights are unchanged. gamma <= 1 is untouched. Slope and
+        // sharpness fitted on whole-level input (`levels_q`): a 0..255 ramp at gamma 2.0 and
+        // psd-tools levels_grayscale's gamma 1.78 (within one level of Photoshop on both).
         let power = u.powf(1.0 / g);
-        let line = 2.0f32.powf(g) * u;
+        let line = 0.93 * 2.0f32.powf(g) * u;
         if power <= 1e-6 || line <= 1e-6 {
             power.min(line)
         } else {
-            let p = 1.8 + 8.8 / g; // p-norm sharpness, fit to Photoshop ground truth
+            let p = 10.0; // p-norm sharpness, fit to Photoshop ground truth
             (power.powf(-p) + line.powf(-p)).powf(-1.0 / p)
         }
     } else {

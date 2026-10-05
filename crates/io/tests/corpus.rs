@@ -41,6 +41,63 @@ const PASS_FLOOR: usize = 113;
 /// Files whose export → re-import renders the same as the import.
 const ROUNDTRIP_FLOOR: usize = 169;
 
+/// Dissolve block size and tolerance (see [`dissolve_matches`]).
+const DISSOLVE_BLOCK: i32 = 16;
+const DISSOLVE_TOL: f32 = 0.1;
+
+/// Oracle for documents with Dissolve layers. Photoshop's dissolve decides each pixel with a
+/// position-only pseudo-random threshold (observed on psd-tools dissolve.psd: where dissolved
+/// layers of equal opacity overlap, a pixel shows the top layer or nothing, never a lower one),
+/// but its generator is not public and can't be recovered from one binary pattern; ours uses
+/// another hash with the same rule. So outside the dissolve layers' bounds pixels must match
+/// as usual (≤ 2/255), and inside them the premultiplied colour averaged over 16 × 16 blocks
+/// (density and colour) must agree within 0.1 (binomial noise of a 50 % dissolve is about
+/// 0.044 per block difference).
+fn dissolve_matches(doc: &photocraft_doc::Document, ours: &[[f32; 4]], ps: &[[f32; 4]]) -> bool {
+    let canvas = doc.bounds();
+    let regions: Vec<_> = doc
+        .walk()
+        .into_iter()
+        .filter(|(_, _, l)| l.visible && l.blend == photocraft_color::BlendMode::Dissolve)
+        .map(|(_, _, l)| photocraft_compose::layer_bounds(l, canvas).intersect(&canvas))
+        .filter(|r| !r.is_empty())
+        .collect();
+    let (w, h) = (canvas.width() as i32, canvas.height() as i32);
+    if regions.is_empty() || ours.len() != ps.len() || ours.len() != (w as usize) * (h as usize) {
+        return false;
+    }
+    let pm = |p: &[f32; 4], c: usize| if c < 3 { p[c] * p[3] } else { p[3] };
+    let inside = |x: i32, y: i32| regions.iter().any(|r| r.contains(x + canvas.x0, y + canvas.y0));
+    for y in 0..h {
+        for x in 0..w {
+            let i = (y * w + x) as usize;
+            if !inside(x, y) && (0..4).any(|c| (pm(&ours[i], c) - pm(&ps[i], c)).abs() > PASS_TOL) {
+                return false;
+            }
+        }
+    }
+    for by in (0..h).step_by(DISSOLVE_BLOCK as usize) {
+        for bx in (0..w).step_by(DISSOLVE_BLOCK as usize) {
+            let (x1, y1) = ((bx + DISSOLVE_BLOCK).min(w), (by + DISSOLVE_BLOCK).min(h));
+            let n = ((x1 - bx) * (y1 - by)) as f32;
+            for c in 0..4 {
+                let (mut a, mut b) = (0.0, 0.0);
+                for y in by..y1 {
+                    for x in bx..x1 {
+                        let i = (y * w + x) as usize;
+                        a += pm(&ours[i], c);
+                        b += pm(&ps[i], c);
+                    }
+                }
+                if ((a - b) / n).abs() > DISSOLVE_TOL {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
 #[test]
 fn corpus_import_flatten_oracle() {
     let env = std::env::var_os("PHOTOCRAFT_CORPUS").filter(|v| !v.is_empty());
@@ -127,6 +184,9 @@ fn corpus_import_flatten_oracle() {
         let status = if m <= PASS_TOL {
             pass += 1;
             "PASS"
+        } else if dissolve_matches(doc, &ours, &merged) {
+            pass += 1;
+            "PASS (dissolve metric)"
         } else {
             diff += 1;
             "DIFF"

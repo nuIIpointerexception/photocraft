@@ -800,7 +800,7 @@ impl<'a> Planner<'a> {
         }
         let mut p = Pass::new(Kernel::Adjust, 0);
         p.a = Some(src);
-        let (kind, params, lut) = adjustment_program(adj, self.cx.transfer);
+        let (kind, params, lut) = adjustment_program(adj, self.cx.transfer, photocraft_compose::adjustment_quantum(self.cx.depth));
         p.adjust_kind = kind;
         p.params = params;
         p.lut = lut;
@@ -1239,7 +1239,7 @@ pub fn adjustment_on_gpu(adj: &Adjustment) -> bool {
 }
 
 /// Adjustment → (kernel kind, parameters, LUT rows). Kinds are the `switch` in `adjust()`.
-pub fn adjustment_program(adj: &Adjustment, transfer: Transfer) -> Program {
+pub fn adjustment_program(adj: &Adjustment, transfer: Transfer, quantum: Option<f32>) -> Program {
     let mut p = [[0.0f32; 4]; 4];
     match adj {
         Adjustment::Invert => (1, p, None),
@@ -1272,7 +1272,7 @@ pub fn adjustment_program(adj: &Adjustment, transfer: Transfer) -> Program {
             (6, p, None)
         }
         // RGB space only (see `adjustment_on_gpu`); the rows are the CPU's channel∘master LUTs.
-        Adjustment::Levels { .. } | Adjustment::Curves { .. } => (7, p, Some(adjust::tone_luts(adj).iter().take(3).map(|t| to_row(t)).collect())),
+        Adjustment::Levels { .. } | Adjustment::Curves { .. } => (7, p, Some(adjust::tone_luts_q(adj, quantum).iter().take(3).map(|t| to_row(t)).collect())),
         Adjustment::HueSaturation { hue, saturation, lightness, colorize, ranges } => {
             p[0] = [*hue, saturation / 100.0, lightness / 100.0, if *colorize { 1.0 } else { 0.0 }];
             if !*colorize && ranges.iter().any(|r| !r.is_neutral()) {
