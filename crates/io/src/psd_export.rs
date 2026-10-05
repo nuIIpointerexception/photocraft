@@ -88,7 +88,10 @@ impl Ex {
         if r.is_empty() {
             return (PsdRect::default(), self.empty_channels());
         }
-        let bytes = s.to_interleaved(r);
+        let mut bytes = s.to_interleaved(r);
+        if self.fmt.mode == ColorMode::Lab && self.fmt.sample == SampleType::U16 {
+            crate::pixels::lab16_chroma(&mut bytes, self.cc + 1, false);
+        }
         let mut invert = vec![self.cmyk; self.cc];
         invert.push(false);
         let planes = deinterleave(&bytes, self.cc + 1, self.fmt.sample, &invert);
@@ -501,6 +504,7 @@ fn merged_planes(doc: &Document, fmt: &PixelFormat, cmyk: bool, matte: bool) -> 
     let canvas = doc.bounds();
     let w = canvas.width() as usize;
     let space = photocraft_compose::cmyk_space(doc);
+    let lab16 = fmt.mode == ColorMode::Lab && sample == SampleType::U16;
     let _ = photocraft_compose::render_bands(doc, canvas, 0, |band| -> Result<(), ()> {
         // Retain alpha whenever it differs from opaque at the stored precision.
         has_alpha |= band.px.iter().any(|p| match sample {
@@ -522,6 +526,8 @@ fn merged_planes(doc: &Document, fmt: &PixelFormat, cmyk: bool, matte: bool) -> 
                         // Matte against white like Photoshop (see `pixels::matte`).
                         let m = if c < cc && matte { crate::pixels::matte(v[c], v[cc], white[c]) } else { v[c] };
                         let x = if cmyk && c < cc { 1.0 - m } else { m };
+                        // 16-bit Lab a*/b* use Photoshop's 0..65280 scale (`pixels::lab16_chroma`).
+                        let x = if lab16 && (c == 1 || c == 2) { x * (crate::pixels::LAB16_CHROMA_MAX / 65535.0) } else { x };
                         encode_be(x, sample, &mut out[c]);
                     }
                 }

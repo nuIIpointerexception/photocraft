@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use photocraft_color::{ColorMode, PixelFormat};
+use photocraft_color::{ColorMode, PixelFormat, SampleType};
 use photocraft_doc::{Document, Pattern};
 use photocraft_geom::Rect;
 use photocraft_psd::patterns::{PsdPattern, block_key, mode_channels, parse_pattern_block, write_pattern_block};
@@ -69,7 +69,10 @@ pub fn from_psd(p: &PsdPattern) -> Option<Pattern> {
         fill.push(max_sample(s));
         invert.push(false);
     }
-    let bytes = interleave(&refs, &fill, w * h, s, &invert);
+    let mut bytes = interleave(&refs, &fill, w * h, s, &invert);
+    if mode == ColorMode::Lab && s == SampleType::U16 {
+        crate::pixels::lab16_chroma(&mut bytes, refs.len(), true);
+    }
     let surface = Surface::from_interleaved(fmt, Rect::new(0, 0, w as i32, h as i32), &bytes);
     Some(Pattern { id: p.id.clone(), name: p.name.clone(), width: p.width, height: p.height, surface })
 }
@@ -83,8 +86,11 @@ pub fn to_psd(p: &Pattern) -> PsdPattern {
     };
     let fmt = PixelFormat::new(mode, f.sample, f.alpha);
     let surf = if fmt == f { p.surface.clone() } else { p.surface.convert(fmt) };
-    let bytes = surf.to_interleaved(p.rect());
+    let mut bytes = surf.to_interleaved(p.rect());
     let ch = fmt.channels();
+    if mode == ColorMode::Lab && fmt.sample == SampleType::U16 {
+        crate::pixels::lab16_chroma(&mut bytes, ch, false);
+    }
     let mut invert = vec![mode == ColorMode::Cmyk; ch];
     if fmt.alpha {
         invert[ch - 1] = false;

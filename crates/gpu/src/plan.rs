@@ -724,9 +724,13 @@ impl<'a> Planner<'a> {
             }
             Fill::Gradient { stops, angle, scale, style, reverse } => {
                 p.gradient = true;
-                p.params[0] = [*angle, *scale, if *reverse { 1.0 } else { 0.0 }, style_index(*style)];
+                // compose::render_fill: whole-pixel end points (fill_layout).
+                let (angle, scale, offset) = photocraft_compose::fill_layout::fill_gradient_layout(*style, *angle, *scale, frame);
+                p.params[0] = [angle, scale, if *reverse { 1.0 } else { 0.0 }, style_index(*style)];
                 let c = frame;
                 p.params[1] = [c.x0 as f32, c.y0 as f32, c.width() as f32, c.height() as f32];
+                p.params[2][0] = offset.0;
+                p.params[2][1] = offset.1;
                 let conv: Vec<(f32, [f32; 4])> = stops
                     .iter()
                     .map(|(t, c)| {

@@ -106,7 +106,10 @@ impl Ctx<'_> {
         fill.push(max_sample(s));
         let mut invert = vec![self.cmyk; self.cc];
         invert.push(false);
-        let bytes = interleave(&refs, &fill, w * h, s, &invert);
+        let mut bytes = interleave(&refs, &fill, w * h, s, &invert);
+        if self.fmt.mode == ColorMode::Lab && s == SampleType::U16 {
+            crate::pixels::lab16_chroma(&mut bytes, self.cc + 1, true);
+        }
         let mut surf = Surface::from_interleaved(self.fmt, Rect::new(r.left, r.top, r.right, r.bottom), &bytes);
         surf.prune();
         surf
@@ -499,7 +502,10 @@ pub fn psd_to_document(file: &PsdFile) -> (Document, Vec<String>) {
             fill.push(max_sample(depth));
             let mut inv = vec![cx.cmyk; cc];
             inv.push(false);
-            let bytes = interleave(&planes, &fill, n, depth, &inv);
+            let mut bytes = interleave(&planes, &fill, n, depth, &inv);
+            if fmt.mode == ColorMode::Lab && depth == SampleType::U16 {
+                crate::pixels::lab16_chroma(&mut bytes, cc + 1, true);
+            }
             let mut s = Surface::from_interleaved(fmt, canvas, &bytes);
             if alpha_idx.is_some() {
                 // Undo Photoshop's white matting of the merged image.

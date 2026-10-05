@@ -8,7 +8,7 @@
 //! colours (end tangents at half the chord slope); Perceptual interpolates in Oklab, Linear in
 //! linear light, Classic in sRGB. Stop midpoints remap each segment piecewise-linearly.
 
-use photocraft_color::Color;
+use photocraft_color::{Color, ColorMode};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Method {
@@ -117,7 +117,10 @@ fn eval(stops: &[(f32, [f32; 3])], mids: &[f32], smooth: f32, t: f32) -> [f32; 3
 /// already interpolates linearly in sRGB.
 pub(crate) fn bake(stops: Vec<(f32, Color)>, midpoints: &[f32], smoothness: f32, method: Method) -> Vec<(f32, Color)> {
     let plain_mids = midpoints.iter().all(|m| (m - 0.5).abs() < 1e-3);
-    if stops.len() < 2 || (smoothness <= 0.0 && method == Method::Classic && plain_mids) {
+    // Classic interpolates in the stops' own model: Lab stops (Lab documents) blend in L*a*b*, which the
+    // compositors' sRGB interpolation can't reproduce (psd-tools 4x4_16bit_lab).
+    let lab = method == Method::Classic && stops.iter().all(|(_, c)| c.mode == ColorMode::Lab);
+    if stops.len() < 2 || (smoothness <= 0.0 && method == Method::Classic && plain_mids && !lab) {
         return stops;
     }
     let mut s = stops;
@@ -126,12 +129,17 @@ pub(crate) fn bake(stops: Vec<(f32, Color)>, midpoints: &[f32], smoothness: f32,
         // Stop colours carry no alpha in Photoshop (opacity has its own stops); keep the nearest.
         s.iter().min_by(|a, b| (a.0 - t).abs().total_cmp(&(b.0 - t).abs())).map_or(1.0, |x| x.1.alpha)
     };
-    let pts: Vec<(f32, [f32; 3])> = s.iter().map(|(t, c)| (*t, into_space(method, c.to_rgb()))).collect();
+    let pts: Vec<(f32, [f32; 3])> =
+        s.iter().map(|(t, c)| (*t, if lab { [c.c[0], c.c[1], c.c[2]] } else { into_space(method, c.to_rgb()) })).collect();
     const N: usize = 96;
     let mut out: Vec<(f32, Color)> = (0..=N)
         .map(|k| {
             let t = k as f32 / N as f32;
-            let rgb = out_of_space(method, eval(&pts, midpoints, smoothness.clamp(0.0, 1.0), t));
+            let v = eval(&pts, midpoints, smoothness.clamp(0.0, 1.0), t);
+            if lab {
+                return (t, Color { mode: ColorMode::Lab, c: [v[0].clamp(0.0, 1.0), v[1].clamp(0.0, 1.0), v[2].clamp(0.0, 1.0), 0.0], alpha: alpha(t) });
+            }
+            let rgb = out_of_space(method, v);
             (t, Color::rgba(rgb[0], rgb[1], rgb[2], alpha(t)))
         })
         .collect();

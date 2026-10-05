@@ -104,6 +104,27 @@ pub fn max_sample(s: SampleType) -> Vec<u8> {
     }
 }
 
+/// Top of Photoshop's 16-bit Lab a*/b* scale: it stores `32768 + 256·a` (0..65280 spans −128..127,
+/// fitted on psd-tools `4x4_16bit_lab`: the merged image holds a stop's `LbCl` a* = 52.29 as 46154),
+/// while documents keep a*/b* on the 8-bit scale `(a + 128) / 255` at every depth.
+pub const LAB16_CHROMA_MAX: f32 = 65280.0;
+
+/// Rescales the a*/b* channels (1 and 2) of interleaved native-endian 16-bit Lab pixels with
+/// `ch` channels: PSD → document when `to_doc`, else document → PSD. Round-trips exactly.
+pub fn lab16_chroma(bytes: &mut [u8], ch: usize, to_doc: bool) {
+    if ch < 3 {
+        return;
+    }
+    let k = if to_doc { 65535.0 / f64::from(LAB16_CHROMA_MAX) } else { f64::from(LAB16_CHROMA_MAX) / 65535.0 };
+    for px in bytes.chunks_exact_mut(ch * 2) {
+        for c in 1..3 {
+            let v = u16::from_ne_bytes([px[2 * c], px[2 * c + 1]]);
+            let w = (f64::from(v) * k).round().min(65535.0) as u16;
+            px[2 * c..2 * c + 2].copy_from_slice(&w.to_ne_bytes());
+        }
+    }
+}
+
 /// Native-endian encoding of zero.
 pub fn zero_sample(s: SampleType) -> Vec<u8> {
     vec![0; s.bytes()]
