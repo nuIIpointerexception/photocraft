@@ -80,6 +80,7 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
 pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) -> Services {
     let savers: Rc<RefCell<HashMap<u64, Autosaver>>> = Rc::default();
     let savers2 = savers.clone();
+    let clip: Rc<RefCell<Option<arboard::Clipboard>>> = Rc::default();
     let automation_read = automation.clone().map(|workspace| {
         Box::new(move |path: &str| {
             let bytes = workspace.read(path).map_err(|error| error.to_string())?;
@@ -132,14 +133,29 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
         })),
         inbox: None,
         open_url: Some(Box::new(|url: &str| open::that(url).map_err(|e| e.to_string()))),
-        clipboard_set_image: Some(Box::new(|w: u32, h: u32, px: &[u8]| {
-            let mut cb = arboard::Clipboard::new().map_err(|e| e.to_string())?;
-            cb.set_image(arboard::ImageData { width: w as usize, height: h as usize, bytes: std::borrow::Cow::Borrowed(px) }).map_err(|e| e.to_string())
-        })),
-        clipboard_get_image: Some(Box::new(|| {
-            let img = arboard::Clipboard::new().ok()?.get_image().ok()?;
-            Some((img.width as u32, img.height as u32, img.bytes.into_owned()))
-        })),
+        clipboard_set_image: Some({
+            let clip = clip.clone();
+            Box::new(move |w: u32, h: u32, px: &[u8]| {
+                let mut slot = clip.try_borrow_mut().map_err(|_| "clipboard is busy".to_string())?;
+                let cb = match slot.as_mut() {
+                    Some(c) => c,
+                    None => slot.insert(arboard::Clipboard::new().map_err(|e| e.to_string())?),
+                };
+                cb.set_image(arboard::ImageData { width: w as usize, height: h as usize, bytes: std::borrow::Cow::Borrowed(px) }).map_err(|e| e.to_string())
+            })
+        }),
+        clipboard_get_image: Some({
+            let clip = clip.clone();
+            Box::new(move || {
+                let mut slot = clip.try_borrow_mut().ok()?;
+                let cb = match slot.as_mut() {
+                    Some(c) => c,
+                    None => slot.insert(arboard::Clipboard::new().ok()?),
+                };
+                let img = cb.get_image().ok()?;
+                Some((img.width as u32, img.height as u32, img.bytes.into_owned()))
+            })
+        }),
         load_prefs: Some(Box::new(|| std::fs::read_to_string(prefs_file()?).ok())),
         save_prefs: Some(Box::new(|text: &str| write_atomic(&prefs_file().ok_or("no config directory")?, text.as_bytes()))),
         // Crash recovery: background incremental .pcraft saves into the recovery directory.
