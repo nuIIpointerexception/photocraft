@@ -1264,7 +1264,7 @@ pub fn adjustment_program(adj: &Adjustment, transfer: Transfer, quantum: Option<
             (5, p, None)
         }
         Adjustment::Exposure { exposure, offset, gamma } => {
-            let g = match transfer {
+            let g = match transfer.for_exposure() {
                 Transfer::Srgb => 0.0,
                 Transfer::Gamma(g) => g,
             };

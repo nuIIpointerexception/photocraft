@@ -30,6 +30,15 @@ impl Transfer {
             _ => Transfer::Srgb,
         }
     }
+    /// The tone curve Exposure linearises through: RGB documents use a pure 2.2 power, not the
+    /// sRGB curve (psd-tools adjustment_nested_composition_4: an offset of 0.1738 lifts 76 to 134,
+    /// not 136; ag-psd masks), grey documents their dot-gain gamma.
+    pub fn for_exposure(self) -> Self {
+        match self {
+            Transfer::Srgb => Transfer::Gamma(2.2),
+            t => t,
+        }
+    }
     fn decode(self, v: f32) -> f32 {
         match self {
             Transfer::Srgb => photocraft_color::convert::srgb_to_linear(v.max(0.0)),
@@ -96,6 +105,7 @@ pub fn apply_depth(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, quant
             // through the document tone curve (fitted on the corpus).
             let m = 2f32.powf(*exposure);
             let g = gamma.max(0.01);
+            let transfer = transfer.for_exposure();
             map_rgb(buf, |c| {
                 c.map(|v| {
                     let lin = (transfer.decode(v) * m + offset).max(0.0).powf(1.0 / g);
