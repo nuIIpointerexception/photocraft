@@ -257,13 +257,13 @@ fn gradient_and_pattern_fills_roundtrip() {
     let mut d = gen_doc(ColorMode::Rgb, SampleType::U8, Features::PIXELS);
     d.layers.push(Layer::new(
         "grad",
-        LayerContent::Fill(Fill::Gradient {
-            stops: vec![(0.0, photocraft_color::Color::rgb(1.0, 0.0, 0.0)), (1.0, photocraft_color::Color::rgb(0.0, 0.0, 1.0))],
-            angle: 30.0,
-            scale: 1.0,
-            style: GradientStyle::Diamond,
-            reverse: true,
-        }),
+        LayerContent::Fill(Fill::gradient(
+            vec![(0.0, photocraft_color::Color::rgb(1.0, 0.0, 0.0)), (1.0, photocraft_color::Color::rgb(0.0, 0.0, 1.0))],
+            30.0,
+            1.0,
+            GradientStyle::Diamond,
+            true,
+        )),
     ));
     d.layers.push(Layer::new(
         "pat",

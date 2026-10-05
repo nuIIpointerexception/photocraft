@@ -112,16 +112,6 @@ fn composite_area(
 
 /// Gradient tool over `area` (the selection bounds or canvas).
 #[allow(clippy::too_many_arguments)]
-/// Per-pixel dither noise in [0, 1) from a position hash (decorrelated, no visible pattern).
-fn dither_noise(x: i32, y: i32) -> f32 {
-    let mut h = (x as u32).wrapping_mul(0x9E37_79B1) ^ (y as u32).wrapping_mul(0x85EB_CA77);
-    h ^= h >> 15;
-    h = h.wrapping_mul(0x2C1B_3C6D);
-    h ^= h >> 12;
-    f32::from((h & 0xFFFF) as u16) / 65535.0
-}
-
-#[allow(clippy::too_many_arguments)]
 pub fn paint_gradient(
     s: &mut Surface,
     area: Rect,
@@ -145,7 +135,7 @@ pub fn paint_gradient(
             let mut c = sample_stops(stops, if reverse { 1.0 - t } else { t });
             if dither {
                 // One quantisation step of monochromatic noise breaks 8-bit banding without speckle.
-                let n = (dither_noise(x, y) - 0.5) / 255.0;
+                let n = (photocraft_color::dither_noise(x, y) - 0.5) / 255.0;
                 for ch in c.iter_mut().take(3) {
                     *ch = (*ch + n).clamp(0.0, 1.0);
                 }

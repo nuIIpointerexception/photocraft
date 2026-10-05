@@ -103,6 +103,11 @@ pub fn rich_doc(mode: ColorMode, depth: SampleType) -> Document {
             scale: 1.5,
             style: GradientStyle::default(),
             reverse: true,
+            opacity_stops: vec![(0.0, 1.0), (1.0, 0.25)],
+            midpoints: vec![0.3],
+            offset: (0.1, -0.2),
+            dither: true,
+            align: false,
         }),
     );
 

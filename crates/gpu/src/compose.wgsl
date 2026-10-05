@@ -606,10 +606,24 @@ fn gradient_t(d: vec2<i32>) -> f32 {
     return t;
 }
 
+// photocraft_color::dither_noise: the gradient dither's position hash, in [0, 1).
+fn dither_noise(d: vec2<i32>) -> f32 {
+    var h = (bitcast<u32>(d.x) * 0x9E3779B1u) ^ (bitcast<u32>(d.y) * 0x85EBCA77u);
+    h = h ^ (h >> 15u);
+    h = h * 0x2C1B3C6Du;
+    h = h ^ (h >> 12u);
+    return f32(h & 0xFFFFu) / 65535.0;
+}
+
 fn layer_texel(d: vec2<i32>) -> vec4<f32> {
     if ((op.flags & F_GRADIENT) != 0u) {
         let t = gradient_t(d);
-        return vec4(lut(0, t), lut(1, t), lut(2, t), lut(3, t));
+        var c = vec4(lut(0, t), lut(1, t), lut(2, t), lut(3, t));
+        // p2.w: dither (gradient fills).
+        if (op.p2.w > 0.5) {
+            c = vec4(clamp(c.rgb + (dither_noise(d) - 0.5) / 255.0, vec3(0.0), vec3(1.0)), c.a);
+        }
+        return c;
     }
     if ((op.flags & F_TEX) != 0u) {
         let q = d - op.tex_origin;

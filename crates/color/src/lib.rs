@@ -10,6 +10,17 @@ pub mod convert;
 
 pub use blend::BlendMode;
 
+/// Per-pixel gradient dither noise in `[0, 1)` from a position hash (decorrelated, no visible
+/// pattern). Shared by the Gradient tool and Gradient Fill layers (and mirrored in the GPU
+/// compositor), so a live gradient dithers exactly like the painted one.
+pub fn dither_noise(x: i32, y: i32) -> f32 {
+    let mut h = (x as u32).wrapping_mul(0x9E37_79B1) ^ (y as u32).wrapping_mul(0x85EB_CA77);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2C1B_3C6D);
+    h ^= h >> 12;
+    f32::from((h & 0xFFFF) as u16) / 65535.0
+}
+
 use serde::{Deserialize, Serialize};
 
 /// Storage type of one channel sample.

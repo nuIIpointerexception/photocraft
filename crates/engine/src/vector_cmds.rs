@@ -185,7 +185,7 @@ pub fn path_json(p: &Path) -> Value {
 fn fill_json(f: &Fill) -> Value {
     match f {
         Fill::Solid(c) => json!(hex(c)),
-        Fill::Gradient { stops, angle, scale, style, reverse } => json!({ "gradient": {
+        Fill::Gradient { stops, angle, scale, style, reverse, .. } => json!({ "gradient": {
             "stops": stops.iter().map(|(t, c)| json!([t, hex(c)])).collect::<Vec<_>>(),
             "angle": angle, "scale": scale * 100.0, "style": format!("{style:?}").to_ascii_lowercase(), "reverse": reverse } }),
         Fill::Pattern { name, scale, .. } => json!({ "pattern": name, "scale": scale * 100.0 }),
@@ -214,13 +214,13 @@ fn parse_fill(v: &Value) -> std::result::Result<Option<Fill>, String> {
             "diamond" => GradientStyle::Diamond,
             _ => GradientStyle::Linear,
         };
-        return Ok(Some(Fill::Gradient {
+        return Ok(Some(Fill::gradient(
             stops,
-            angle: f64p(g, "angle").unwrap_or(90.0) as f32,
-            scale: f64p(g, "scale").unwrap_or(100.0) as f32 / 100.0,
+            f64p(g, "angle").unwrap_or(90.0) as f32,
+            f64p(g, "scale").unwrap_or(100.0) as f32 / 100.0,
             style,
-            reverse: g.get("reverse").and_then(Value::as_bool).unwrap_or(false),
-        }));
+            g.get("reverse").and_then(Value::as_bool).unwrap_or(false),
+        )));
     }
     if let Some(name) = v.get("pattern").and_then(Value::as_str) {
         return Ok(Some(Fill::Pattern {

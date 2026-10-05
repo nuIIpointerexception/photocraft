@@ -178,6 +178,45 @@ pub(crate) type Stops = (Vec<(f32, Color)>, Vec<(f32, f32)>);
 /// Stops of a `Grdn` descriptor, baked to Photoshop's interpolation (smoothness `Intr`, stop
 /// midpoints, and the parent's `gs99` interpolation method when given).
 pub(crate) fn gradient_stops_with(grad: &Descriptor, method: Option<&[u8]>) -> Stops {
+    let raw = gradient_stops_raw(grad);
+    let stops = if raw.stops.len() >= 2 {
+        crate::gradient_bake::bake(raw.stops, &raw.mids, raw.smooth, crate::gradient_bake::Method::from_code(method))
+    } else {
+        raw.stops
+    };
+    (stops, raw.opacity)
+}
+
+/// A `Grdn` descriptor's stops as stored: colour stops (sorted), the midpoint of each segment
+/// between them, opacity stops and the smoothness (`Intr`, `0..=1`).
+pub(crate) struct RawStops {
+    pub stops: Vec<(f32, Color)>,
+    pub mids: Vec<f32>,
+    pub opacity: Vec<(f32, f32)>,
+    pub smooth: f32,
+}
+
+/// Stops of a gradient fill layer, kept editable: when Photoshop's interpolation is plain
+/// (no smoothness, Classic method) the stops stay as they are with their midpoints, else they
+/// are baked like [`gradient_stops_with`] (midpoints folded in). Opacity stops that are all
+/// 100 % come back empty.
+pub(crate) fn gradient_stops_editable(grad: &Descriptor, method: Option<&[u8]>) -> RawStops {
+    let mut raw = gradient_stops_raw(grad);
+    let m = crate::gradient_bake::Method::from_code(method);
+    if raw.stops.len() >= 2 && (raw.smooth > 0.0 || m != crate::gradient_bake::Method::Classic) {
+        raw.stops = crate::gradient_bake::bake(std::mem::take(&mut raw.stops), &raw.mids, raw.smooth, m);
+        raw.mids.clear();
+    }
+    if raw.mids.iter().all(|m| (m - 0.5).abs() < 1e-3) {
+        raw.mids.clear();
+    }
+    if raw.opacity.iter().all(|o| (o.1 - 1.0).abs() < 1e-4) {
+        raw.opacity.clear();
+    }
+    raw
+}
+
+fn gradient_stops_raw(grad: &Descriptor) -> RawStops {
     let mut stops = Vec::new();
     let mut mids = Vec::new();
     let mut opacity = Vec::new();
@@ -195,9 +234,12 @@ pub(crate) fn gradient_stops_with(grad: &Descriptor, method: Option<&[u8]>) -> S
     // Midpoint k applies to the segment after stop k.
     let mut order: Vec<usize> = (0..stops.len()).collect();
     order.sort_by(|a, b| stops[*a].0.total_cmp(&stops[*b].0));
-    let mids: Vec<f32> = order.iter().skip(1).map(|i| mids[*i]).collect();
+    let mids: Vec<f32> = order.iter().skip(1).map(|i| mids.get(*i).copied().unwrap_or(0.5)).collect();
     let smooth = num(grad.get("Intr")).map_or(0.0, |v| (v / 4096.0) as f32);
-    let stops = if stops.len() >= 2 { crate::gradient_bake::bake(stops, &mids, smooth, crate::gradient_bake::Method::from_code(method)) } else { stops };
+    let mut sorted: Vec<(f32, Color)> = order.iter().filter_map(|i| stops.get(*i).cloned()).collect();
+    if sorted.len() != stops.len() {
+        sorted = stops;
+    }
     if let Some(Value::List(items)) = grad.get("Trns") {
         for it in items {
             if let Value::Descriptor(s) = it {
@@ -206,20 +248,32 @@ pub(crate) fn gradient_stops_with(grad: &Descriptor, method: Option<&[u8]>) -> S
             }
         }
     }
-    (stops, opacity)
+    RawStops { stops: sorted, mids, opacity, smooth }
 }
 
 /// A `Grdn` descriptor for colour and opacity stops.
 pub(crate) fn gradient_desc(stops: &[(f32, Color)], opacity: &[(f32, f32)]) -> Descriptor {
+    gradient_desc_with(stops, opacity, &[])
+}
+
+/// [`gradient_desc`] with colour midpoints (one per segment between the sorted stops; each is
+/// stored on the stop that ends its segment, as [`gradient_stops_with`] reads it).
+pub(crate) fn gradient_desc_with(stops: &[(f32, Color)], opacity: &[(f32, f32)], mids: &[f32]) -> Descriptor {
+    let mut stops = stops.to_vec();
+    if !mids.is_empty() {
+        stops.sort_by(|a, b| a.0.total_cmp(&b.0));
+    }
     let clrs = stops
         .iter()
-        .map(|(t, c)| {
+        .enumerate()
+        .map(|(i, (t, c))| {
+            let mid = i.checked_sub(1).and_then(|k| mids.get(k)).copied().unwrap_or(0.5);
             Value::Descriptor(
                 Descriptor::new("Clrt")
                     .with("Clr ", Value::Descriptor(color_to_desc(c)))
                     .with("Type", Value::Enumerated { type_id: Id::new("Clry"), value: Id::new("UsrS") })
                     .with("Lctn", Value::Integer((t * 4096.0).round() as i32))
-                    .with("Mdpn", Value::Integer(50)),
+                    .with("Mdpn", Value::Integer((mid.clamp(0.05, 0.95) * 100.0).round() as i32)),
             )
         })
         .collect();
@@ -259,11 +313,25 @@ pub fn fill_from_desc(key: &[u8; 4], d: &Descriptor) -> Option<Fill> {
         b"GdFl" => {
             let angle = num(d.get("Angl")).unwrap_or(90.0) as f32;
             let scale = num(d.get("Scl ")).map_or(1.0, |v| v as f32 / 100.0);
-            let (mut stops, _) = get_desc(d, "Grad").map(|g| gradient_stops_with(g, enum_of(d, "gs99"))).unwrap_or_default();
+            let raw = get_desc(d, "Grad").map(|g| gradient_stops_editable(g, enum_of(d, "gs99")));
+            let (mut stops, midpoints, opacity_stops) = raw.map(|r| (r.stops, r.mids, r.opacity)).unwrap_or_default();
             if stops.is_empty() {
                 stops = vec![(0.0, Color::BLACK), (1.0, Color::WHITE)];
             }
-            Some(Fill::Gradient { stops, angle, scale, style: gradient_style(d), reverse: bool_of(d, "Rvrs") })
+            let pct = |o: &Descriptor, k: &str| num(o.get(k)).map_or(0.0, |v| v as f32 / 100.0);
+            let offset = get_desc(d, "Ofst").map_or((0.0, 0.0), |o| (pct(o, "Hrzn"), pct(o, "Vrtc")));
+            Some(Fill::Gradient {
+                stops,
+                angle,
+                scale,
+                style: gradient_style(d),
+                reverse: bool_of(d, "Rvrs"),
+                opacity_stops,
+                midpoints,
+                offset,
+                dither: bool_of(d, "Dthr"),
+                align: !matches!(d.get("Algn"), Some(Value::Boolean(false))),
+            })
         }
         b"PtFl" => {
             let (name, id) = pattern_ref(d);
@@ -285,14 +353,24 @@ pub fn write_fill(f: &Fill) -> ([u8; 4], Vec<u8>) {
 pub fn fill_to_desc(f: &Fill) -> ([u8; 4], Descriptor) {
     match f {
         Fill::Solid(c) => (*b"SoCo", Descriptor::new("null").with("Clr ", Value::Descriptor(color_to_desc(c)))),
-        Fill::Gradient { stops, angle, scale, style, reverse } => {
+        Fill::Gradient { stops, angle, scale, style, reverse, opacity_stops, midpoints, offset, dither, align } => {
+            let prc = |v: f32| Value::UnitFloat { unit: *b"#Prc", value: f64::from(v * 100.0) };
             let mut d = Descriptor::new("null")
                 .with("Angl", Value::UnitFloat { unit: *b"#Ang", value: f64::from(*angle) })
                 .with("Type", gradient_style_value(*style))
-                .with("Scl ", Value::UnitFloat { unit: *b"#Prc", value: f64::from(scale * 100.0) })
-                .with("Grad", Value::Descriptor(gradient_desc(stops, &[])));
+                .with("Scl ", prc(*scale))
+                .with("Grad", Value::Descriptor(gradient_desc_with(stops, opacity_stops, midpoints)));
             if *reverse {
                 d = d.with("Rvrs", Value::Boolean(true));
+            }
+            if *dither {
+                d = d.with("Dthr", Value::Boolean(true));
+            }
+            if !*align {
+                d = d.with("Algn", Value::Boolean(false));
+            }
+            if *offset != (0.0, 0.0) {
+                d = d.with("Ofst", Value::Descriptor(Descriptor::new("Pnt ").with("Hrzn", prc(offset.0)).with("Vrtc", prc(offset.1))));
             }
             (*b"GdFl", d)
         }
@@ -529,12 +607,19 @@ mod tests {
             Fill::Solid(Color::rgb(1.0, 0.5, 0.0)),
             Fill::Solid(Color { mode: ColorMode::Cmyk, c: [0.1, 0.2, 0.3, 0.4], alpha: 1.0 }),
             Fill::Solid(Color::gray(0.25)),
+            Fill::gradient(vec![(0.0, Color::rgb(1.0, 0.0, 0.0)), (1.0, Color::rgb(0.0, 0.0, 1.0))], 45.0, 1.0, GradientStyle::Reflected, true),
+            // A live gradient (Gradient tool): canvas-aligned, offset, midpoints, opacity, dither.
             Fill::Gradient {
-                stops: vec![(0.0, Color::rgb(1.0, 0.0, 0.0)), (1.0, Color::rgb(0.0, 0.0, 1.0))],
-                angle: 45.0,
-                scale: 1.0,
-                style: GradientStyle::Reflected,
-                reverse: true,
+                stops: vec![(0.0, Color::rgb(1.0, 0.0, 0.0)), (0.5, Color::rgb(0.0, 1.0, 0.0)), (1.0, Color::rgb(0.0, 0.0, 1.0))],
+                angle: -33.5,
+                scale: 2.25,
+                style: GradientStyle::Radial,
+                reverse: false,
+                opacity_stops: vec![(0.0, 1.0), (0.25, 0.5), (1.0, 0.0)],
+                midpoints: vec![0.25, 0.75],
+                offset: (0.125, -0.375),
+                dither: true,
+                align: false,
             },
             Fill::Pattern { name: "Bubbles".into(), scale: 0.5, id: "abc".into(), angle: 30.0, link: false, phase: (3.0, -2.0) },
         ] {

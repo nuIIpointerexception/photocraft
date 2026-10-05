@@ -216,13 +216,7 @@ fn render_shape_formats_and_paint() {
 fn gradient_fill_spans_bounds() {
     let sh = ShapeLayer {
         path: shapes::rect(0.0, 0.0, 100.0, 10.0),
-        fill: Some(Fill::Gradient {
-            stops: vec![(0.0, Color::BLACK), (1.0, Color::WHITE)],
-            angle: 0.0,
-            scale: 1.0,
-            style: photocraft_doc::GradientStyle::Linear,
-            reverse: false,
-        }),
+        fill: Some(Fill::gradient(vec![(0.0, Color::BLACK), (1.0, Color::WHITE)], 0.0, 1.0, photocraft_doc::GradientStyle::Linear, false)),
         ..Default::default()
     };
     let rgba = CompiledShape::new(&sh, DEFAULT_TOLERANCE).render_rgba(Rect::new(0, 0, 100, 10));

@@ -302,10 +302,30 @@ fn fills_and_dissolve() {
     for style in [GradientStyle::Linear, GradientStyle::Radial, GradientStyle::Angle, GradientStyle::Reflected, GradientStyle::Diamond] {
         let mut d = base_doc(64, 48);
         let stops = vec![(0.0, Color::rgb(1.0, 0.0, 0.0)), (0.6, Color::rgb(0.0, 1.0, 0.2)), (1.0, Color::rgb(0.1, 0.1, 0.9))];
-        let mut l = Layer::new("grad", LayerContent::Fill(Fill::Gradient { stops, angle: 30.0, scale: 0.8, style, reverse: style == GradientStyle::Radial }));
+        let mut l = Layer::new("grad", LayerContent::Fill(Fill::gradient(stops, 30.0, 0.8, style, style == GradientStyle::Radial)));
         l.opacity = 0.9;
         d.layers.push(l);
         check(&mut g, &d, &format!("gradient {style:?}"));
+        // A live gradient (Gradient tool): canvas-aligned, offset, midpoints, opacity stops,
+        // dither, masked by a selection.
+        let mut d = base_doc(64, 48);
+        let stops = vec![(0.0, Color::rgb(1.0, 0.0, 0.0)), (0.6, Color::rgb(0.0, 1.0, 0.2)), (1.0, Color::rgb(0.1, 0.1, 0.9))];
+        let fill = Fill::Gradient {
+            stops,
+            angle: -20.0,
+            scale: 0.6,
+            style,
+            reverse: false,
+            opacity_stops: vec![(0.0, 1.0), (1.0, 0.3)],
+            midpoints: vec![0.3, 0.7],
+            offset: (0.15, -0.1),
+            dither: true,
+            align: false,
+        };
+        let mut l = Layer::new("live", LayerContent::Fill(fill));
+        l.mask = Some(mask(Rect::new(8, 4, 40, 40), 13, 0.0));
+        d.layers.push(l);
+        check(&mut g, &d, &format!("live gradient {style:?}"));
     }
     let mut d = base_doc(64, 48);
     let mut l = noise_layer("dis", PixelFormat::RGBA8, Rect::new(0, 0, 64, 48), 41, 0.2);

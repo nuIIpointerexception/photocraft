@@ -226,7 +226,7 @@ impl Paint {
         };
         match f {
             Fill::Solid(c) => Paint::Solid(rgba(c)),
-            Fill::Gradient { stops, angle, scale, style, reverse } => Paint::Gradient {
+            Fill::Gradient { stops, angle, scale, style, reverse, .. } => Paint::Gradient {
                 stops: stops.iter().map(|(p, c)| (*p, rgba(c))).collect(),
                 style: *style,
                 angle: *angle,

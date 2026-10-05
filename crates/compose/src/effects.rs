@@ -411,6 +411,22 @@ fn offset(angle: f32, distance: f32) -> (f32, f32) {
     ((-a.cos() * distance).round(), (a.sin() * distance).round())
 }
 
+/// The lengths a 100 % gradient at `angle` spans in a `w` × `h` frame: the chord (Linear and
+/// Reflected) and the ellipse-norm length (Radial, Angle, Diamond; its half is the radius).
+pub fn gradient_units(angle: f32, w: f32, h: f32) -> (f32, f32) {
+    let (s, c) = angle.to_radians().sin_cos();
+    // Gradient length: the bounds' extent along the angle as an ellipse
+    // norm (a unit gradient scaled to the bounds); fitted on psd-tools
+    // gradient-styles.psd (cached Photoshop renderings of every style).
+    let len = ((c * w).powi(2) + (s * h).powi(2)).sqrt().max(1.0);
+    // Linear / Reflected span the chord of the bounds through their centre along the angle:
+    // min(w / |cos|, h / |sin|). A 45° gradient on a 29 px square runs 41 px (psd-tools
+    // shape-fx2), an 87° one on a 600 × 60 text line 60 px (layer_effects); axis-aligned angles
+    // span the width / height.
+    let chord = (w / c.abs().max(1e-6)).min(h / s.abs().max(1e-6)).max(1.0);
+    (chord, len)
+}
+
 /// Gradient parameter `t` in `0..=1` for pixel centre `(x, y)` inside `bounds`.
 #[allow(clippy::too_many_arguments)]
 pub fn gradient_t(style: GradientStyle, angle: f32, scale: f32, reverse: bool, offset: (f32, f32), bounds: Rect, x: f32, y: f32) -> f32 {
@@ -423,15 +439,8 @@ pub fn gradient_t(style: GradientStyle, angle: f32, scale: f32, reverse: bool, o
     // Distance along the gradient direction (y axis points down).
     let along = dx * c - dy * s;
     let across = dx * s + dy * c;
-    // Gradient length: the bounds' extent along the angle as an ellipse
-    // norm (a unit gradient scaled to the bounds); fitted on psd-tools
-    // gradient-styles.psd (cached Photoshop renderings of every style).
-    let len = ((c * w).powi(2) + (s * h).powi(2)).sqrt().max(1.0) * scale.max(1e-3);
-    // Linear / Reflected span the chord of the bounds through their centre along the angle:
-    // min(w / |cos|, h / |sin|). A 45° gradient on a 29 px square runs 41 px (psd-tools
-    // shape-fx2), an 87° one on a 600 × 60 text line 60 px (layer_effects); axis-aligned angles
-    // span the width / height.
-    let chord = (w / c.abs().max(1e-6)).min(h / s.abs().max(1e-6)).max(1.0) * scale.max(1e-3);
+    let (chord, len) = gradient_units(angle, w, h);
+    let (chord, len) = (chord * scale.max(1e-3), len * scale.max(1e-3));
     let mut t = match style {
         GradientStyle::Linear => along / chord + 0.5,
         GradientStyle::Reflected => (along / (chord / 2.0)).abs(),

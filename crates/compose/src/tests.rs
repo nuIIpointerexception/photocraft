@@ -276,13 +276,7 @@ fn solid_and_gradient_fill_layers() {
     d.layers.push(Layer::new("fill", LayerContent::Fill(Fill::Solid(Color::rgb(0.0, 0.0, 1.0)))));
     assert!(close4(px(&d, 5, 0), [0.0, 0.0, 1.0, 1.0]));
 
-    let g = Fill::Gradient {
-        stops: vec![(0.0, Color::BLACK), (1.0, Color::WHITE)],
-        angle: 0.0,
-        scale: 1.0,
-        style: photocraft_doc::GradientStyle::Linear,
-        reverse: false,
-    };
+    let g = Fill::gradient(vec![(0.0, Color::BLACK), (1.0, Color::WHITE)], 0.0, 1.0, photocraft_doc::GradientStyle::Linear, false);
     let patterns = pattern::PreparedPatterns::new(&[], pattern::PREPARED_PATTERN_BYTES);
     let buf = render_fill(&g, Rect::new(0, 0, 10, 1), Rect::new(0, 0, 10, 1), &patterns);
     // tile independence: a 1px render of the right edge equals the full render
