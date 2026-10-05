@@ -206,7 +206,7 @@ fn dist(a: [f64; 2], b: [f64; 2]) -> f64 {
 }
 
 /// Shift constrains to 45° steps around `from`.
-fn constrain(from: [f64; 2], to: [f64; 2], shift: bool) -> [f64; 2] {
+pub(crate) fn constrain(from: [f64; 2], to: [f64; 2], shift: bool) -> [f64; 2] {
     if !shift {
         return to;
     }

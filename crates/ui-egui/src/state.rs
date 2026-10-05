@@ -308,6 +308,9 @@ pub struct ToolOptions {
     pub gradient_reverse: bool,
     /// Gradient tool: dither to reduce 8-bit banding (Photoshop default on).
     pub gradient_dither: bool,
+    /// Gradient tool mode: false = "Gradient" (live: a Gradient Fill layer, editable on canvas),
+    /// true = "Classic gradient" (paints the pixels).
+    pub gradient_classic: bool,
     pub fill_opacity: f32,
     /// Paint Bucket fill source: false = Foreground colour, true = Pattern (Patterns panel selection).
     pub bucket_fill_pattern: bool,
@@ -403,6 +406,7 @@ impl Default for ToolOptions {
             gradient_style: "linear".into(),
             gradient_reverse: false,
             gradient_dither: true,
+            gradient_classic: false,
             fill_opacity: 100.0,
             bucket_fill_pattern: false,
             type_font: "Inter".into(),

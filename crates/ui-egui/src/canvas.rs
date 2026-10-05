@@ -223,6 +223,10 @@ fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Arc<Document>
     if let Some(shown) = crate::adjust_preview::display_doc(app, idx) {
         return shown;
     }
+    // Gradient tool (live) drag, or a stop dragged in the Properties panel.
+    if let Some(shown) = crate::gradient_ui::display_doc(app, idx) {
+        return shown;
+    }
     let st = &app.session.documents()[idx];
     if let Some(l) = live_stroke(app, idx) {
         return (l.stroke.doc.clone(), l.display_key());
@@ -1199,6 +1203,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         crate::retouch_ui::draw_source_marker(app, &painter, &xf);
         crate::vector_ui::draw_overlay(app, &painter, &xf, &doc);
         crate::analysis_ui::draw_overlay(app, &painter, &xf);
+        crate::gradient_ui::draw_overlay(app, &painter, &xf);
         crate::slice_ui::draw_overlay(app, &painter, &xf);
         // Tool cursors (Photoshop-style).
         let guide_hover = response.hover_pos().filter(|_| tool == Tool::Move).and_then(|p| {
@@ -1538,6 +1543,10 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
     }
     // Crop tool: draw, move and resize the frame.
     if crate::crop_ui::pointer(app, ev, mods) {
+        return;
+    }
+    // Gradient tool, live mode: draw and edit Gradient Fill layers.
+    if crate::gradient_ui::pointer(app, ev, mods) {
         return;
     }
     let tool = app.ui.tool;

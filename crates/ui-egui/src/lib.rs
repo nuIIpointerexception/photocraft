@@ -40,6 +40,7 @@ pub mod file_ui;
 pub mod filter_dialog;
 pub mod gallery_ui;
 pub mod gpu_canvas;
+pub mod gradient_ui;
 mod icon_data;
 pub mod icons;
 pub mod layer_menu_ui;
@@ -251,6 +252,8 @@ pub struct PhotocraftApp {
     pub(crate) style_preview: Option<(u64, Option<std::sync::Arc<Document>>)>,
     /// Liquify dialog, Puppet Warp and Perspective Warp sessions (distort_ui).
     pub(crate) distort: distort_ui::Distort,
+    /// Gradient tool live-mode drags and previews (gradient_ui).
+    pub(crate) gradient: gradient_ui::LiveGradient,
     /// Filter › Camera Raw Filter dialog (camera_raw_ui).
     pub(crate) camera_raw: Option<camera_raw_ui::CameraRawDialog>,
     /// Filter › Adaptive Wide Angle dialog (wide_angle_ui).
@@ -342,6 +345,7 @@ impl PhotocraftApp {
             transform_preview: None,
             style_preview: None,
             distort: Default::default(),
+            gradient: Default::default(),
             camera_raw: None,
             wide_angle: None,
             tone_hist: None,
